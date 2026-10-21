@@ -1,0 +1,472 @@
+{
+  "elements": [
+    {
+      "type": "Label",
+      "caption": "Huawei SUN2000 mit LUNA2000-Akku und Smartmeter über das Symcon ModBus Gateway (Modbus TCP, z. B. Smart Dongle, Geräte-ID 1)."
+    },
+    {
+      "type": "Label",
+      "caption": "Die Instanz fragt alle Werte nacheinander ab und schreibt nur geprüfte Werte. Die Archivierung schaltet das Modul nie selbst ein."
+    },
+    {
+      "type": "ExpansionPanel",
+      "caption": "Abfrage",
+      "expanded": true,
+      "items": [
+        {
+          "type": "CheckBox",
+          "name": "Active",
+          "caption": "Abfrage aktiv"
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "PollFast",
+          "caption": "Leistung, Akku, Netz alle",
+          "suffix": "Sekunden",
+          "minimum": 5,
+          "maximum": 3600
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "PollMedium",
+          "caption": "Energiezähler und Zustand alle",
+          "suffix": "Sekunden",
+          "minimum": 10,
+          "maximum": 3600
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "PollSlow",
+          "caption": "Akku-Einstellungen alle",
+          "suffix": "Sekunden",
+          "minimum": 60,
+          "maximum": 86400
+        }
+      ]
+    },
+    {
+      "type": "ExpansionPanel",
+      "caption": "Anlage und Anzeige",
+      "items": [
+        {
+          "type": "CheckBox",
+          "name": "HasBattery",
+          "caption": "LUNA2000-Akku vorhanden"
+        },
+        {
+          "type": "CheckBox",
+          "name": "HasMeter",
+          "caption": "Smartmeter (DTSU666-H) vorhanden"
+        },
+        {
+          "type": "CheckBox",
+          "name": "ShowSettings",
+          "caption": "Einstellungen anzeigen (Akku: Leistungen, Ladegrenzen, Betriebsart, Netzladen; Einspeisebegrenzung)"
+        },
+        {
+          "type": "CheckBox",
+          "name": "ShowStrings",
+          "caption": "PV-Strings einzeln anzeigen (Spannung, Strom, Leistung je String)"
+        },
+        {
+          "type": "CheckBox",
+          "name": "ShowPhases",
+          "caption": "Phasenwerte anzeigen (Spannung, Strom und Leistung je Phase L1–L3 vom Smartmeter, Netzfrequenz, Spannung L1–L3 vom Wechselrichter)"
+        },
+        {
+          "type": "CheckBox",
+          "name": "ShowAutarky",
+          "caption": "Autarkie und Eigenverbrauch berechnen (Tageswerte in %, dazu Hausverbrauch, Netzbezug und Einspeisung heute – benötigt Smartmeter)"
+        },
+        {
+          "type": "CheckBox",
+          "name": "ShowKW",
+          "caption": "Leistungen zusätzlich in kW anzeigen (je eine Variable direkt unter dem W-Wert)"
+        },
+        {
+          "type": "Select",
+          "name": "GridSign",
+          "caption": "Vorzeichen Netzleistung",
+          "options": [
+            {
+              "caption": "Einspeisung + / Bezug − (wie Huawei)",
+              "value": 0
+            },
+            {
+              "caption": "Einspeisung − / Bezug +",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "type": "Select",
+          "name": "BatterySign",
+          "caption": "Vorzeichen Akku-Leistung",
+          "options": [
+            {
+              "caption": "Laden + / Entladen − (wie Huawei)",
+              "value": 0
+            },
+            {
+              "caption": "Laden − / Entladen +",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "type": "Label",
+          "caption": "Das Vorzeichen gilt für neue Werte (auch kW und Phasen). Bereits archivierte Werte behalten ihr Vorzeichen – am besten vor dem Archivieren festlegen."
+        },
+        {
+          "type": "CheckBox",
+          "name": "GroupFolders",
+          "caption": "Variablen in Themen-Ordner (Dummy-Instanzen) einsortieren: PV-Anlage, Akku, Netz & Smartmeter, Verbrauch & Bilanz, Wechselrichter, Geräteinfo, Diagnose"
+        },
+        {
+          "type": "CheckBox",
+          "name": "SortVariables",
+          "caption": "Variablen automatisch nach Themen sortieren (aus = eigene Reihenfolge bleibt erhalten)"
+        },
+        {
+          "type": "CheckBox",
+          "name": "ShowDiagnostics",
+          "caption": "Diagnose-Variablen anzeigen (Verbindung, Fehler heute, letzter Fehler)"
+        },
+        {
+          "type": "Label",
+          "caption": "Ausgeschaltete Bereiche werden auch nicht abgefragt – das entlastet den Wechselrichter."
+        }
+      ]
+    },
+    {
+      "type": "ExpansionPanel",
+      "caption": "Steuerung",
+      "items": [
+        {
+          "type": "Label",
+          "caption": "Ohne Freigabe liest das Modul nur. Mit Freigabe lassen sich die Einstellungen über die Variablen (Schieberegler/Auswahl) und per Skript (HPV_…) ändern. Jeder Wert wird nach dem Schreiben zurückgelesen."
+        },
+        {
+          "type": "CheckBox",
+          "name": "AllowControl",
+          "caption": "Steuerung erlauben (Akku-Einstellungen, Netzladen, Zwangsladen/-entladen, Einspeisebegrenzung)"
+        },
+        {
+          "type": "CheckBox",
+          "name": "AllowInverterSwitch",
+          "caption": "Zusätzlich: Wechselrichter Ein/Aus erlauben (Achtung: ausgeschaltet erzeugt die Anlage keinen Strom)"
+        },
+        {
+          "type": "Label",
+          "caption": "Zwangsladen/-entladen läuft immer mit einer Dauer (max. 24 h). Danach beendet der Wechselrichter es selbst – zur Sicherheit zusätzlich das Modul."
+        }
+      ]
+    },
+    {
+      "type": "ExpansionPanel",
+      "caption": "Plausibilitätsprüfung (Schutz für das Archiv)",
+      "items": [
+        {
+          "type": "NumberSpinner",
+          "name": "PowerLimit",
+          "caption": "Höchste plausible Leistung",
+          "suffix": "W",
+          "minimum": 1000,
+          "maximum": 1000000
+        },
+        {
+          "type": "Label",
+          "caption": "Leistungen über diesem Wert werden verworfen. Daraus ergibt sich auch, wie schnell Energiezähler höchstens steigen dürfen."
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "ConfirmReads",
+          "caption": "Auffällige Werte erst übernehmen nach",
+          "suffix": "gleichen Abfragen",
+          "minimum": 1,
+          "maximum": 10
+        },
+        {
+          "type": "Label",
+          "caption": "Auffällig sind z. B. Zähler, die rückwärts laufen oder springen, und Ladestand-Sprünge über 10 %. 1 = sofort übernehmen."
+        }
+      ]
+    },
+    {
+      "type": "ExpansionPanel",
+      "caption": "Kommunikation (Experten)",
+      "items": [
+        {
+          "type": "NumberSpinner",
+          "name": "RequestPause",
+          "caption": "Pause zwischen zwei Anfragen",
+          "suffix": "ms",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "MaxRetries",
+          "caption": "Wiederholungen bei BUSY",
+          "suffix": "mal",
+          "minimum": 0,
+          "maximum": 5
+        },
+        {
+          "type": "CheckBox",
+          "name": "AutoReconnect",
+          "caption": "Verbindung automatisch neu aufbauen, wenn der Smart Dongle „hängt“ (schaltet die Schnittstelle kurz aus und wieder ein)"
+        },
+        {
+          "type": "Label",
+          "caption": "Hintergrund: Bricht die Verbindung richtig ab (Dongle-Neustart, WLAN weg), verbindet der Client Socket von Symcon selbst neu – dafür braucht es diese Option nicht. Der Huawei Smart Dongle kann aber „hängen“: Die Verbindung bleibt für Symcon offen, es kommen jedoch keine Antworten mehr. Symcon merkt das nicht, die Instanz zeigt dann „Keine Antwort vom Wechselrichter“ (Variable „Verbindung OK“ = Nein). Mit dieser Option schließt das Modul nach der eingestellten Zahl fehlgeschlagener Durchläufe die Schnittstelle (Client Socket) für 5 Sekunden und öffnet sie wieder – höchstens alle 10 Minuten. Dabei ändert das Modul die Einstellung „Offen“ der Schnittstelle. Tipp: unabhängig davon eine Benachrichtigung auf „Verbindung OK“ legen."
+        },
+        {
+          "type": "NumberSpinner",
+          "name": "ReconnectAfter",
+          "caption": "Neu aufbauen nach",
+          "suffix": "fehlgeschlagenen Durchläufen",
+          "minimum": 2,
+          "maximum": 100
+        },
+        {
+          "type": "Label",
+          "caption": "Empfehlung Gateway: „Wartezeit bis zum Timeout“ 10 Sekunden – der Smart Dongle antwortet teils langsam."
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "ExpansionPanel",
+      "caption": "Archiv-Werkzeug",
+      "items": [
+        {
+          "type": "Label",
+          "caption": "Übernahme alter Archivdaten",
+          "bold": true
+        },
+        {
+          "type": "Label",
+          "caption": "Immer eine Variable nach der anderen. Es wird nur kopiert, die alten Daten bleiben unverändert. Ausreißer werden ausgelassen, Integer wird in Float umgewandelt. Übernommen werden nur Werte, die älter sind als der älteste Wert der neuen Variable – doppelt wird nichts."
+        },
+        {
+          "type": "SelectVariable",
+          "name": "MigSource",
+          "caption": "Alte Variable",
+          "width": "750px"
+        },
+        {
+          "type": "Select",
+          "name": "MigTarget",
+          "caption": "Neue Variable",
+          "width": "750px",
+          "options": []
+        },
+        {
+          "type": "RowLayout",
+          "items": [
+            {
+              "type": "Select",
+              "name": "MigConvert",
+              "caption": "Umrechnung alt → neu",
+              "width": "450px",
+              "options": [],
+              "onChange": "IPS_RequestAction($id, 'MigConvert', $MigConvert);"
+            },
+            {
+              "type": "NumberSpinner",
+              "name": "MigFactor",
+              "caption": "Eigener Faktor",
+              "digits": 6,
+              "visible": false
+            },
+            {
+              "type": "CheckBox",
+              "name": "MigInvert",
+              "caption": "Vorzeichen umdrehen"
+            }
+          ]
+        },
+        {
+          "type": "RowLayout",
+          "items": [
+            {
+              "type": "Button",
+              "caption": "Vorschau",
+              "onClick": "HPV_ArchiveTransfer($id, $MigSource, $MigTarget, $MigConvert, $MigFactor, $MigInvert, true);"
+            },
+            {
+              "type": "Button",
+              "caption": "Übernahme starten",
+              "confirm": "Archivdaten jetzt in die neue Variable kopieren? Die alten Daten bleiben unverändert. Die Archivierung der neuen Variable wird dabei eingeschaltet (bei Energiezählern mit Aggregation „Zähler“). Vorher eine Symcon-Sicherung machen.",
+              "onClick": "HPV_ArchiveTransfer($id, $MigSource, $MigTarget, $MigConvert, $MigFactor, $MigInvert, false);"
+            }
+          ]
+        },
+        {
+          "type": "RowLayout",
+          "items": [
+            {
+              "type": "Button",
+              "caption": "Fortschritt / Ergebnis anzeigen",
+              "onClick": "HPV_ArchiveStatus($id);"
+            },
+            {
+              "type": "Button",
+              "caption": "Abbrechen",
+              "onClick": "HPV_ArchiveCancel($id);"
+            }
+          ]
+        },
+        {
+          "type": "Label",
+          "caption": "Ergebnis",
+          "bold": true
+        },
+        {
+          "type": "Label",
+          "name": "ArchiveResult",
+          "caption": ""
+        },
+        {
+          "type": "Label",
+          "name": "ArchiveWarn",
+          "caption": "",
+          "bold": true,
+          "color": 13840175,
+          "visible": false
+        },
+        {
+          "type": "Label",
+          "name": "ArchiveOk",
+          "caption": "",
+          "bold": true,
+          "color": 3046706,
+          "visible": false
+        },
+        {
+          "type": "Label",
+          "caption": "Ausreißer des letzten Auftrags",
+          "bold": true
+        },
+        {
+          "type": "Label",
+          "name": "ArchiveListInfo",
+          "caption": "Echte Ausreißer zuerst, höchstens 1000."
+        },
+        {
+          "type": "List",
+          "name": "ArchiveOutliers",
+          "rowCount": 12,
+          "add": false,
+          "delete": false,
+          "columns": [
+            {
+              "caption": "Variable",
+              "name": "Variable",
+              "width": "220px"
+            },
+            {
+              "caption": "Zeit",
+              "name": "Time",
+              "width": "160px"
+            },
+            {
+              "caption": "Wert",
+              "name": "Value",
+              "width": "110px"
+            },
+            {
+              "caption": "Grund",
+              "name": "Reason",
+              "width": "auto"
+            },
+            {
+              "caption": "Vergleichswert (neuer)",
+              "name": "Ref",
+              "width": "260px"
+            }
+          ],
+          "values": []
+        },
+        {
+          "type": "Label",
+          "caption": "Kontrolle nach der Übernahme",
+          "bold": true
+        },
+        {
+          "type": "Label",
+          "name": "CleanHint",
+          "caption": ""
+        },
+        {
+          "type": "RowLayout",
+          "items": [
+            {
+              "type": "Select",
+              "name": "CleanTarget",
+              "caption": "Neue Variable",
+              "options": [],
+              "width": "450px"
+            },
+            {
+              "type": "Button",
+              "caption": "Prüfen (Vorschau)",
+              "onClick": "HPV_ArchiveClean($id, $CleanTarget, false);",
+              "name": "CleanCheck"
+            },
+            {
+              "type": "Button",
+              "caption": "Ausreißer löschen",
+              "confirm": "Gefundene Ausreißer endgültig aus dem Archiv löschen? Vorher „Prüfen“ ansehen und eine Symcon-Sicherung machen.",
+              "onClick": "HPV_ArchiveClean($id, $CleanTarget, true);",
+              "name": "CleanDelete"
+            }
+          ]
+        },
+        {
+          "type": "Label",
+          "caption": "\n\n\n\n\n\n\n"
+        }
+      ]
+    },
+    {
+      "type": "Button",
+      "caption": "Alle Werte jetzt lesen",
+      "onClick": "HPV_UpdateAll($id);"
+    },
+    {
+      "type": "Button",
+      "caption": "Diagnose anzeigen",
+      "onClick": "HPV_ShowDiagnostics($id);"
+    },
+    {
+      "type": "Label",
+      "name": "Result",
+      "caption": ""
+    }
+  ],
+  "status": [
+    {
+      "code": 102,
+      "icon": "active",
+      "caption": "Verbunden, Werte werden gelesen"
+    },
+    {
+      "code": 104,
+      "icon": "inactive",
+      "caption": "Abfrage ausgeschaltet"
+    },
+    {
+      "code": 201,
+      "icon": "error",
+      "caption": "Keine Antwort vom Wechselrichter (Details: „Diagnose anzeigen“)"
+    },
+    {
+      "code": 202,
+      "icon": "error",
+      "caption": "ModBus Gateway bzw. Client Socket nicht aktiv"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+HuaweiPV – Symcon-Modul für Huawei SUN2000 / LUNA2000
+Copyright (c) 2026 Peter Chrisben
+
+Dieses Werk ist lizenziert unter der Creative Commons
+Namensnennung - Nicht-kommerziell - Weitergabe unter gleichen Bedingungen 4.0 International Lizenz
+(CC BY-NC-SA 4.0).
+
+Lizenztext: https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode.de
+Kurzfassung: https://creativecommons.org/licenses/by-nc-sa/4.0/deed.de
+
+Die Registeradressen, Datentypen und Faktoren basieren auf der Huawei-Dokumentation
+"Solar Inverter Modbus Interface Definitions" und der Bibliothek huawei-solar-lib
+(https://github.com/wlcrs/huawei-solar-lib, Apache License 2.0). Es wurde kein Code übernommen.
