@@ -280,10 +280,22 @@ class HPVRegisters
      * Fasst Register zu Blöcken zusammen – nur lückenlos aneinander grenzende Register,
      * damit nie undefinierte Adressen abgefragt werden.
      *
-     * @param array $defs Ident => Definition
+     * @param array $defs   Ident => Definition
+     * @param int   $maxGap Nur für den Schnappschuss: Lücke aus bekannten, dokumentierten Registern, die mitgelesen
+     *                      werden darf (z. B. 32066–32079 zwischen PV- und Wirkleistung). Standard 0 = lückenlos.
      * @return array Liste von ['addr' => int, 'qty' => int, 'idents' => string[]]
+     *               Die Lage eines Werts im Block ist immer addr(Wert) − addr(Block).
      */
-    public static function BuildBlocks(array $defs): array
+    /**
+     * Schnappschuss: Werte, die zeitgleich gebraucht werden (Bilanz PV/Netz/Akku/Haus). Sie werden in jedem
+     * Durchlauf zuerst und direkt nacheinander gelesen – ohne andere Blöcke dazwischen.
+     * Zwischen PV-Leistung (32064) und Wirkleistung (32080) bzw. Akkustatus (37000) und Ladestand (37004)
+     * liegen nur dokumentierte Register (Spannungen/Ströme 32066–32079, Bus-Spannung 37003) → je ein Block.
+     */
+    public const SNAPSHOT = ['PVPower', 'ActivePower', 'BatteryStatus', 'BatteryPower', 'BatterySOC', 'GridPower'];
+    public const SNAPSHOT_GAP = 16;
+
+    public static function BuildBlocks(array $defs, int $maxGap = 0): array
     {
         uasort($defs, function ($a, $b) {
             return $a['addr'] <=> $b['addr'];
@@ -294,9 +306,11 @@ class HPVRegisters
             $len = self::Length($def);
             // Nur lückenlose Register derselben Option zusammenfassen: Kennt ein Gerät ein optionales Register
             // nicht (ILLEGAL_DATA_ADDRESS), fällt nur dieser Block aus – nicht z. B. die Netzleistung.
-            if ($cur !== null && $def['addr'] === $cur['addr'] + $cur['qty'] && $cur['qty'] + $len <= self::MAX_BLOCK
+            $end = $cur === null ? 0 : $cur['addr'] + $cur['qty'];
+            if ($cur !== null && $def['addr'] >= $end && $def['addr'] <= $end + $maxGap
+                && $def['addr'] + $len - $cur['addr'] <= self::MAX_BLOCK
                 && ($def['opt'] ?? '') === $cur['opt']) {
-                $cur['qty'] += $len;
+                $cur['qty'] = $def['addr'] + $len - $cur['addr'];
                 $cur['idents'][] = $ident;
                 continue;
             }

@@ -2,7 +2,7 @@
 
 Symcon-Modul für Huawei-PV-Anlagen: Wechselrichter **SUN2000** (z. B. SUN2000-5KTL-M1), Akku **LUNA2000** und Smartmeter **DTSU666-H** über **Modbus TCP** (Smart Dongle oder direkte Verbindung).
 
-Aktuelle Version: 1.3 (Build 17)
+Aktuelle Version: 1.4 (Build 18)
 
 Autor: Peter Chrisben · Lizenz: [CC BY-NC-SA 4.0](LICENSE)
 
@@ -181,9 +181,9 @@ Temperatur, Prozent und Frequenz werden ohne Nachkommastelle angezeigt. Autarkie
 
 | Variable | Ident | Register | Einheit | Abfrage | Vorhanden wenn |
 |---|---|---|---|---|---|
-| PV-Leistung | `PVPower` | 32064 | W | schnell | immer |
-| Wechselrichter AC-Leistung | `ActivePower` | 32080 | W | schnell | immer |
-| Hausverbrauch | `HouseConsumption` | berechnet | W | – | Smartmeter |
+| PV-Leistung (DC-Eingang aller Strings) | `PVPower` | 32064 | W | schnell | immer |
+| Wechselrichter AC-Leistung (Wirkleistung am Ausgang) | `ActivePower` | 32080 | W | schnell | immer |
+| Hausverbrauch = AC-Leistung − Netzleistung (Huawei-Vorzeichen), nie unter 0 | `HouseConsumption` | berechnet | W | – | Smartmeter |
 | Netzleistung (+ Einspeisung / − Bezug) | `GridPower` | 37113 | W | schnell | Smartmeter |
 | Einspeisung | `GridFeedIn` | berechnet | W | – | Smartmeter |
 | Netzbezug | `GridImport` | berechnet | W | – | Smartmeter |
@@ -283,7 +283,12 @@ Ohne Freigabe liest das Modul nur. Mit **„Steuerung erlauben“** im Formular 
 
 1. **Vorab:** Ist der Wert erlaubt? Bereiche wie in der Huawei-App, Leistungen höchstens bis zur Gerätegrenze des Akkus bzw. zur Nennleistung des Wechselrichters.
 2. **Schreiben:** Funktion 06 für ein Register, 16 für 32-Bit-Werte. Bei BUSY wird wiederholt.
-3. **Zurücklesen:** Hat der Wechselrichter den Wert nicht übernommen, gibt es eine Fehlermeldung, und die Variable zeigt den echten Wert.
+3. **Unverändert:** Steht der Wert schon im Wechselrichter, wird nichts gesendet. Das Modul liest das Register vorher und spart so unnötige Schreibvorgänge („Diagnose anzeigen“ zählt sie als „übersprungen“).
+4. **Zurücklesen:** Hat der Wechselrichter den Wert nicht übernommen, gibt es eine Fehlermeldung, und die Variable zeigt den echten Wert.
+
+**Fehler erkennen (z. B. in Skripten oder Energiemanagern):** Die `HPV_Set…`-Funktionen geben `false` zurück, wenn das Schreiben oder Zurücklesen fehlschlägt. `RequestAction` (Schieberegler, `IPS_RequestAction`) wirft dann einen Fehler mit dem Grund im Klartext; der Grund steht außerdem unter „Diagnose anzeigen“ bei „Letzter Schreibfehler“.
+
+**Wie oft schreiben?** Huawei veröffentlicht nicht, ob und wie Einstellungen wie die max. Lade-/Entladeleistung (47075/47077) im Flash-Speicher abgelegt werden. Sie bleiben nach einem Neustart erhalten, werden also dauerhaft gespeichert, und solcher Speicher verträgt nur eine begrenzte Zahl von Schreibvorgängen. Eine belastbare Zahl dazu gibt es nicht. Empfehlung: nur bei Änderung schreiben (macht das Modul automatisch), Werte in groben Schritten (z. B. 100 W) vorgeben und nicht öfter als alle paar Minuten ändern. Wer sehr häufig regeln will, sollte das eher über die Betriebsart bzw. Zwangsladen/-entladen mit Dauer lösen als über ständig neue Grenzwerte.
 
 | Einstellung | Variable | Bereich |
 |---|---|---|
@@ -340,11 +345,38 @@ Nach einem Neustart von Symcon vergleicht das Modul den ersten Wert mit dem zule
 
 **Ablauf eines Durchlaufs:**
 
-1. Alle fälligen Werte werden zu Blöcken zusammengefasst. Ein Block enthält nur lückenlos aneinander grenzende Register derselben Option, höchstens 64. Kennt ein Gerät ein optionales Register nicht, fällt so nur dieser Block aus.
-2. Die Blöcke werden nacheinander gelesen, mit Pause dazwischen.
-3. **BUSY:** Bis zu 3 Wiederholungen nach 0,5 s, 1 s und 2 s.
-4. **Timeout:** Höchstens eine Wiederholung, weil jeder Timeout die Wartezeit des Gateways kostet. Antworten zwei Blöcke hintereinander nicht, wird der Durchlauf abgebrochen.
-5. Ein Durchlauf startet nach 20 s keine neuen Blöcke mehr. Ein neuer Durchlauf beginnt erst, wenn der vorige fertig ist.
+1. **Schnappschuss zuerst:** PV-Leistung, AC-Leistung, Akku (Status, Leistung, Ladestand) und Netzleistung werden in jedem Durchlauf als Erstes und direkt nacheinander gelesen – in 3 Anfragen (32064–32081, 37000–37004, 37113–37114), ohne andere Blöcke dazwischen. So passen die Werte zeitlich zusammen (siehe [Schnappschuss](#schnappschuss-zeitgleiche-werte-für-energiemanager)). Lehnt ein Gerät die zusammengefassten Anfragen ab, liest das Modul diese Werte automatisch wieder einzeln.
+2. Alle anderen fälligen Werte werden zu Blöcken zusammengefasst. Ein Block enthält nur lückenlos aneinander grenzende Register derselben Option, höchstens 64. Kennt ein Gerät ein optionales Register nicht, fällt so nur dieser Block aus.
+3. Die Blöcke werden nacheinander gelesen, mit Pause dazwischen.
+4. **BUSY:** Bis zu 3 Wiederholungen nach 0,5 s, 1 s und 2 s.
+5. **Timeout:** Höchstens eine Wiederholung, weil jeder Timeout die Wartezeit des Gateways kostet. Antworten zwei Blöcke hintereinander nicht, wird der Durchlauf abgebrochen.
+6. Ein Durchlauf startet nach 20 s keine neuen Blöcke mehr. Ein neuer Durchlauf beginnt erst, wenn der vorige fertig ist.
+
+**Abfragetakt für Energiemanager:** Standard für „Leistung, Akku, Netz alle“ sind 10 s. Für eine Regelung (z. B. SYMEMS) sind **5 s** sinnvoll (kleinster Wert). Der Schnappschuss braucht nur 3 Anfragen; Zähler, Gerätedaten und Einstellungen bleiben bei ihren langsameren Takten. Nach dem Umstellen einen Tag lang „Diagnose anzeigen“ beobachten: BUSY und Timeouts sollten nicht zunehmen. Falls doch, wieder auf 10 s gehen.
+
+### Schnappschuss: zeitgleiche Werte für Energiemanager
+
+`HPV_GetSnapshot(int $InstanzID): string` liefert die Werte des letzten Schnappschusses als JSON:
+
+```json
+{"t": 1793027060, "pv": 3000, "pvAc": 2400, "grid": 1000, "battery": 500, "soc": 70, "house": 1400, "ok": true, "dur": 820}
+```
+
+| Feld | Bedeutung |
+|---|---|
+| `t` | Unix-Zeit des Schnappschusses |
+| `pv` | PV-Leistung in W, **DC-Eingang** aller Strings (32064) |
+| `pvAc` | Wirkleistung des Wechselrichters in W, **AC-Ausgang** (32080) – enthält Akku-Entladung, abzüglich Akku-Ladung und Wandlungsverluste |
+| `grid` | Netzleistung in W, **+ = Einspeisung, − = Bezug** (37113) |
+| `battery` | Akku-Leistung in W, **+ = Laden, − = Entladen** (37001); `null` ohne Akku; 0, wenn der Akku ruht |
+| `soc` | Ladestand in % (37004); `null` ohne Akku |
+| `house` | Hausverbrauch in W = `pvAc − grid`, nie unter 0 |
+| `ok` | Bilanz plausibel: \|pv − grid − battery − house\| ≤ 500 W + 5 % von pv |
+| `dur` | Dauer der Schnappschuss-Abfragen in ms |
+
+- Die Vorzeichen sind **immer** wie bei Huawei – unabhängig von den Einstellungen „Vorzeichen Netz/Akku“. Wer die Werte weiterverarbeitet, muss also nichts umrechnen.
+- Der Schnappschuss wird bei jeder Abfrage der Leistungswerte erneuert; `t` zeigt, wie alt er ist.
+- **Bilanz:** `pv − grid − battery − house` ergibt rechnerisch `pv − battery − pvAc`, also die Verluste des Wechselrichters (meist wenige Prozent). Passt die Bilanz nicht, stammen die Werte nicht aus demselben Moment oder ein Wert ist falsch. „Diagnose anzeigen“ zählt solche Schnappschüsse und zeigt den letzten mit allen Werten.
 
 **Ohne Antwort:**
 
@@ -423,6 +455,7 @@ Wer bisher einzelne „ModBus Adresse“-Instanzen hatte, kann deren Archivdaten
 HPV_Poll(int $InstanzID): bool              // fällige Gruppen lesen (läuft per Timer)
 HPV_UpdateAll(int $InstanzID): bool         // sofort alle Werte lesen
 HPV_ShowDiagnostics(int $InstanzID): string // Diagnose als Text
+HPV_GetSnapshot(int $InstanzID): string     // letzter Schnappschuss als JSON, Huawei-Vorzeichen (siehe Abschnitt 10)
 
 // Steuerung (nur mit „Steuerung erlauben“; Rückgabe false bei Fehler, Grund unter „Diagnose anzeigen“)
 HPV_SetWorkingMode(int $InstanzID, int $Mode): bool           // 0 Adaptiv, 1 Fest, 2 Max. Eigenverbrauch, 4 Volleinspeisung, 5 Zeitsteuerung

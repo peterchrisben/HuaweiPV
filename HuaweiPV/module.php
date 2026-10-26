@@ -152,6 +152,7 @@ class HuaweiPV extends IPSModule
         $this->RegisterAttributeString('AppliedSigns', '');
         $this->RegisterAttributeString('PresentationSigs', '{}');
         $this->RegisterAttributeString('SortSig', '');
+        $this->RegisterAttributeString('SnapshotMode', '');
         $this->RegisterAttributeBoolean('LegacyCustomCleared', false);
         // Archiv-Werkzeug: laufender Auftrag und letztes Ergebnis
         $this->RegisterAttributeString('ArchiveJob', '');
@@ -347,6 +348,22 @@ class HuaweiPV extends IPSModule
     }
 
     /** Diagnose als Text (wird auch im Formular angezeigt). */
+    /**
+     * Letzter Schnappschuss als JSON – zeitgleiche Werte für Energiemanager (z. B. SYMEMS).
+     * Immer im Huawei-Vorzeichen, unabhängig von GridSign/BatterySign: grid + = Einspeisung, battery + = Laden.
+     * {"t": Unix-Zeit, "pv": W (DC-Eingang 32064), "pvAc": W (Wirkleistung 32080), "grid": W, "battery": W|null,
+     *  "soc": %|null, "house": W, "ok": Bilanz plausibel, "dur": ms für die Schnappschuss-Abfragen}
+     */
+    public function GetSnapshot(): string
+    {
+        $snap = $this->GetBuffer('Snapshot');
+        if ($snap === '') {
+            return json_encode(['t' => 0, 'pv' => null, 'pvAc' => null, 'grid' => null, 'battery' => null,
+                'soc' => null, 'house' => null, 'ok' => false, 'dur' => 0]);
+        }
+        return $snap;
+    }
+
     public function ShowDiagnostics(): string
     {
         $d = $this->Diag();
@@ -361,7 +378,11 @@ class HuaweiPV extends IPSModule
             'Letzter Fehler: ' . ($d['lastError'] !== '' ? $d['lastError'] : '–'),
             'Letzter verworfener Wert: ' . ($d['lastRejected'] !== '' ? $d['lastRejected'] : '–'),
             'Letzter Neuaufbau der Verbindung: ' . ($d['lastReconnect'] > 0 ? date('d.m.Y H:i:s', $d['lastReconnect']) : '–'),
-            'Steuerung: ' . ($this->ReadPropertyBoolean('AllowControl') ? 'erlaubt' : 'gesperrt') . sprintf(' – heute %d Schreibbefehle', $d['writes']),
+            sprintf('Schnappschuss (PV/Netz/Akku zeitgleich): heute %d, Dauer im Schnitt %s ms, Bilanz unplausibel: %d',
+                $d['snapshots'], $d['snapshots'] > 0 ? (string) round($d['snapshotMs'] / $d['snapshots']) : '–', $d['balanceBad']),
+            'Letzte unplausible Bilanz: ' . ($d['lastBalance'] !== '' ? $d['lastBalance'] : '–'),
+            'Steuerung: ' . ($this->ReadPropertyBoolean('AllowControl') ? 'erlaubt' : 'gesperrt')
+                . sprintf(' – heute %d Schreibbefehle, %d übersprungen (Wert stand schon im Wechselrichter)', $d['writes'], $d['writesSkipped']),
             'Letzter Schreibbefehl: ' . ($d['lastWrite'] !== '' ? $d['lastWrite'] : '–'),
             'Letzter Schreibfehler: ' . ($d['lastWriteError'] !== '' ? $d['lastWriteError'] : '–')
         ];
@@ -1082,8 +1103,21 @@ class HuaweiPV extends IPSModule
         if (count($defs) === 0) {
             return true;
         }
-        $blocks = HPVRegisters::BuildBlocks($defs);
-        $this->SendDebug('Abfrage', 'Gruppen: ' . implode(', ', $groups) . ' – ' . count($blocks) . ' Anfragen', 0);
+        // Schnappschuss zuerst und direkt nacheinander, danach alles andere
+        $snapDefs = array_intersect_key($defs, array_flip(HPVRegisters::SNAPSHOT));
+        $restDefs = array_diff_key($defs, $snapDefs);
+        $merge = $this->ReadAttributeString('SnapshotMode') !== 'split';
+        $snapBlocks = HPVRegisters::BuildBlocks($snapDefs, $merge ? HPVRegisters::SNAPSHOT_GAP : 0);
+        foreach ($snapBlocks as &$b) {
+            $b['snapshot'] = true;
+        }
+        unset($b);
+        $blocks = array_merge($snapBlocks, HPVRegisters::BuildBlocks($restDefs));
+        $this->SendDebug('Abfrage', 'Gruppen: ' . implode(', ', $groups) . ' – ' . count($blocks) . ' Anfragen (davon '
+            . count($snapBlocks) . ' Schnappschuss)', 0);
+        $snapStart = 0.0;
+        $snapEnd = 0.0;
+        $snapRaw = [];
 
         $diag = $this->Diag();
         $state = $this->FilterState();
@@ -1094,7 +1128,7 @@ class HuaweiPV extends IPSModule
         $pause = max(0, $this->ReadPropertyInteger('RequestPause'));
         $first = true;
 
-        foreach ($blocks as $block) {
+        while (($block = array_shift($blocks)) !== null) {
             if (microtime(true) - $start > self::CYCLE_BUDGET) {
                 $this->SendDebug('Abfrage', 'Zeitbudget erschöpft – restliche Anfragen im nächsten Durchlauf', 0);
                 break;
@@ -1104,7 +1138,28 @@ class HuaweiPV extends IPSModule
             }
             $first = false;
 
+            $isSnap = !empty($block['snapshot']);
+            if ($isSnap && $snapStart === 0.0) {
+                $snapStart = microtime(true);
+            }
             $res = $this->ReadWithRetry($block['addr'], $block['qty'], $diag);
+            if ($isSnap) {
+                $snapEnd = microtime(true);
+            }
+            if (!$res['ok'] && $isSnap && $res['kind'] === 'error' && $this->HasGap($block, $defs)) {
+                // Gerät kennt ein Register in der Lücke nicht → ab jetzt einzeln lesen (gleich in diesem Durchlauf)
+                if ($this->ReadAttributeString('SnapshotMode') !== 'split') {
+                    $this->WriteAttributeString('SnapshotMode', 'split');
+                }
+                $this->SendDebug('Schnappschuss', 'Zusammengefasster Block ' . $block['addr'] . ' ×' . $block['qty']
+                    . ' abgelehnt – lese ab jetzt einzeln', 0);
+                $split = HPVRegisters::BuildBlocks(array_intersect_key($defs, array_flip($block['idents'])));
+                foreach (array_reverse($split) as $sb) {
+                    $sb['snapshot'] = true;
+                    array_unshift($blocks, $sb);
+                }
+                continue;
+            }
             if (!$res['ok']) {
                 $failedInRow++;
                 if ($failedInRow >= 2 && $res['kind'] === 'timeout') {
@@ -1116,19 +1171,23 @@ class HuaweiPV extends IPSModule
             $failedInRow = 0;
             $okBlocks++;
 
-            $offset = 0;
             foreach ($block['idents'] as $ident) {
                 $def = $defs[$ident];
                 $len = HPVRegisters::Length($def);
-                $value = HPVRegisters::Decode($def, array_slice($res['regs'], $offset, $len));
-                $offset += $len;
+                $value = HPVRegisters::Decode($def, array_slice($res['regs'], $def['addr'] - $block['addr'], $len));
                 if ($this->Accept($ident, $def, $value, $state, $diag, $now)) {
                     $updated[$ident] = true;
+                    if ($isSnap) {
+                        $snapRaw[$ident] = (float) $this->RawVal($ident);
+                    }
                 }
             }
         }
 
         $this->ApplyDerived($updated);
+        if ($snapStart > 0.0) {
+            $this->StoreSnapshot($snapRaw, $snapStart, $snapEnd, $snapDefs, $diag);
+        }
         $this->SyncForceState($updated, $now);
         $this->UpdateEnergyBalance($updated, $now, in_array('medium', $groups, true));
         if (isset($updated['BatteryMaxChargeLimit']) || isset($updated['BatteryMaxDischargeLimit']) || isset($updated['RatedPower'])) {
@@ -1156,6 +1215,60 @@ class HuaweiPV extends IPSModule
             $this->CheckReconnect($diag);
         }
         return $success;
+    }
+
+    /**
+     * Schnappschuss speichern: PV, Wirkleistung, Netz, Akku aus einem Durchlauf, immer im Huawei-Vorzeichen
+     * (Netz + = Einspeisung, Akku + = Laden). Bilanz PV − Netz − Akku − Haus prüfen und Abweichungen in der Diagnose zählen.
+     */
+    private function StoreSnapshot(array $raw, float $start, float $end, array $snapDefs, array &$diag): void
+    {
+        $hasBattery = isset($snapDefs['BatteryPower']);
+        $pv = $raw['PVPower'] ?? null;
+        $ac = $raw['ActivePower'] ?? null;
+        $grid = $raw['GridPower'] ?? null;
+        $battery = $hasBattery ? ($raw['BatteryPower'] ?? ($this->BatteryIdle() ? 0.0 : null)) : 0.0;
+        $soc = $hasBattery && isset($raw['BatterySOC']) ? $raw['BatterySOC'] : null;
+        $house = ($ac !== null && $grid !== null) ? round(max(0.0, $ac - $grid), 1) : null;
+        $complete = $pv !== null && $ac !== null && $grid !== null && $battery !== null;
+        $deviation = $complete ? $pv - $grid - $battery - $house : null;
+        $ok = $complete && abs($deviation) <= self::BALANCE_TOLERANCE_W + 0.05 * max(0.0, $pv);
+        $dur = (int) round(($end - $start) * 1000);
+        $snapshot = [
+            't' => (int) floor($start), 'pv' => $pv, 'pvAc' => $ac, 'grid' => $grid, 'battery' => $hasBattery ? $battery : null,
+            'soc' => $soc, 'house' => $house, 'ok' => $ok, 'dur' => $dur
+        ];
+        $this->SetBuffer('Snapshot', json_encode($snapshot));
+        $this->SendDebug('Schnappschuss', sprintf('%d ms – PV %s W, AC %s W, Netz %s W, Akku %s W, Haus %s W, Abweichung %s W%s',
+            $dur, $this->Show($pv), $this->Show($ac), $this->Show($grid), $this->Show($battery), $this->Show($house),
+            $this->Show($deviation), $ok ? '' : ' – NICHT plausibel'), 0);
+        if ($complete && !$ok) {
+            $diag['balanceBad']++;
+            $diag['lastBalance'] = sprintf('%s – %d W (PV %d, AC %d, Netz %d, Akku %d, Haus %d)', date('d.m. H:i:s', (int) $start),
+                (int) round($deviation), (int) round($pv), (int) round($ac), (int) round($grid), (int) round($battery), (int) round($house));
+        }
+        if ($complete) {
+            $diag['snapshots']++;
+            $diag['snapshotMs'] += $dur;
+        }
+    }
+
+    /** Enthält der Block mitgelesene Register, die zu keinem Wert gehören (Lücke im Schnappschuss)? */
+    private function HasGap(array $block, array $defs): bool
+    {
+        $len = 0;
+        foreach ($block['idents'] as $ident) {
+            $len += HPVRegisters::Length($defs[$ident]);
+        }
+        return $block['qty'] > $len;
+    }
+
+    /** Erlaubte Abweichung der Bilanz PV − Netz − Akku − Haus: 500 W + 5 % der PV-Leistung (Wechselrichterverluste). */
+    private const BALANCE_TOLERANCE_W = 500;
+
+    private function Show(?float $v): string
+    {
+        return $v === null ? '–' : (string) round($v);
     }
 
     /**
@@ -1509,6 +1622,20 @@ class HuaweiPV extends IPSModule
 
         $regs = HPVRegisters::Encode($def, $value);
         return $this->WithLock(function () use ($ident, $def, $regs, $value): bool {
+            // Steht der Wert schon im Register, nichts senden (schont den Speicher des Wechselrichters)
+            $diag = $this->Diag();
+            $before = $this->ReadWithRetry($def['addr'], HPVRegisters::Length($def), $diag);
+            if ($before['ok'] && $before['regs'] === $regs) {
+                $diag['writesSkipped']++;
+                $this->WriteDiag($diag);
+                $this->SendDebug('Schreiben', $def['name'] . ' = ' . $value . ' steht bereits im Wechselrichter – nicht gesendet', 0);
+                $current = HPVRegisters::Decode($def, $before['regs']);
+                if ($current !== null) {
+                    $this->StoreValue($ident, $def, $current);
+                }
+                return true;
+            }
+            $this->WriteDiag($diag);
             if (!$this->WriteRaw($def['addr'], $regs, $def['name'] . ' = ' . $value)) {
                 return false;
             }
@@ -2251,12 +2378,13 @@ class HuaweiPV extends IPSModule
         $default = [
             'date' => date('Y-m-d'), 'requests' => 0, 'errors' => 0, 'busy' => 0, 'timeouts' => 0, 'retries' => 0,
             'rejected' => 0, 'lastError' => '', 'lastRejected' => '', 'lastSuccess' => 0, 'failedCycles' => 0, 'lastReconnect' => 0,
-            'writes' => 0, 'lastWrite' => '', 'lastWriteError' => ''
+            'writes' => 0, 'lastWrite' => '', 'lastWriteError' => '',
+            'writesSkipped' => 0, 'snapshots' => 0, 'snapshotMs' => 0, 'balanceBad' => 0, 'lastBalance' => ''
         ];
         $d = is_array($d) ? array_merge($default, $d) : $default;
         if ($d['date'] !== date('Y-m-d')) {
             // Tageszähler zurücksetzen, Rest behalten
-            foreach (['requests', 'errors', 'busy', 'timeouts', 'retries', 'rejected', 'writes'] as $k) {
+            foreach (['requests', 'errors', 'busy', 'timeouts', 'retries', 'rejected', 'writes', 'writesSkipped', 'snapshots', 'snapshotMs', 'balanceBad'] as $k) {
                 $d[$k] = 0;
             }
             $d['date'] = date('Y-m-d');

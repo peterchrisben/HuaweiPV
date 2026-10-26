@@ -1,5 +1,21 @@
 # Changelog
 
+## Version 1.4
+
+### Build 18 (26.10.2026)
+
+Für Energiemanager: zeitgleiche Leistungswerte. Bestehende Einstellungen, Variablen und Funktionen bleiben unverändert.
+
+#### Neu
+- **Schnappschuss:** PV-Leistung, AC-Leistung, Akku und Netzleistung werden in jedem Durchlauf als Erstes und direkt nacheinander gelesen (3 statt bisher 5 Anfragen), ohne andere Abfragen dazwischen. Die Werte passen damit zeitlich zusammen; der Hausverbrauch wird aus genau diesen Werten berechnet.
+- Funktion `HPV_GetSnapshot` liefert den letzten Schnappschuss als JSON (Zeit, PV, AC-Leistung, Netz, Akku, Ladestand, Haus, Bilanz plausibel, Dauer) – immer im Huawei-Vorzeichen
+- Diagnose: Anzahl Schnappschüsse, mittlere Dauer, Zähler „Bilanz unplausibel“ mit letzter Abweichung
+- Steuerung: Steht der Wert schon im Wechselrichter, wird nichts gesendet (Diagnose zählt „übersprungen“)
+
+#### Dokumentation
+- Was PV-Leistung (DC-Eingang) und AC-Leistung sind und wie der Hausverbrauch berechnet wird
+- Abfragetakt 5 s für Energiemanager, Fehlererkennung beim Schreiben, Hinweis zur Häufigkeit von Schreibvorgängen
+
 ## Version 1.3
 
 ### Build 17 (21.10.2026)
