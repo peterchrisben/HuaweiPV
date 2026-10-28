@@ -2,7 +2,7 @@
 
 Symcon-Modul für Huawei-PV-Anlagen: Wechselrichter **SUN2000** (z. B. SUN2000-5KTL-M1), Akku **LUNA2000** und Smartmeter **DTSU666-H** über **Modbus TCP** (Smart Dongle oder direkte Verbindung).
 
-Aktuelle Version: 1.4 (Build 18)
+Aktuelle Version: 1.4 (Build 19)
 
 Autor: Peter Chrisben · Lizenz: [CC BY-NC-SA 4.0](LICENSE)
 
@@ -329,6 +329,7 @@ Bevor ein Wert in eine Variable geschrieben wird, prüft ihn das Modul:
 |---|---|---|
 | Huawei-Kennung „ungültig“ (0xFFFF, 0x7FFF, 0xFFFFFFFF, 0x7FFFFFFF) | Ladestand 6553,5 % | wird immer verworfen |
 | … bei Akku-Werten, während der Akku ruht (Ruhemodus, Standby, Offline) | Akku-Leistung nachts bei 5 % | kein Fehler: Akku-Leistung = 0 W, andere Akku-Werte behalten den letzten Wert |
+| … beim Wirkungsgrad | morgens/abends bei wenig PV | kein Fehler: letzter Wert bleibt |
 | Feste Grenzen | Ladestand 101 %, Leistung über „höchste plausible Leistung“ | wird immer verworfen |
 | Zähler läuft rückwärts oder fällt auf 0 | Gesamtertrag 12345 → 0 kWh | auffällig |
 | Zähler springt schneller, als die Anlage erzeugen kann | +500 kWh in einer Minute | auffällig |
@@ -359,7 +360,7 @@ Nach einem Neustart von Symcon vergleicht das Modul den ersten Wert mit dem zule
 `HPV_GetSnapshot(int $InstanzID): string` liefert die Werte des letzten Schnappschusses als JSON:
 
 ```json
-{"t": 1793027060, "pv": 3000, "pvAc": 2400, "grid": 1000, "battery": 500, "soc": 70, "house": 1400, "ok": true, "dur": 820}
+{"t": 1793027060, "pv": 3000, "pvAc": 2400, "grid": 1000, "battery": 500, "soc": 70, "house": 1400, "ok": true, "dur": 820, "sinceWrite": 95}
 ```
 
 | Feld | Bedeutung |
@@ -373,10 +374,12 @@ Nach einem Neustart von Symcon vergleicht das Modul den ersten Wert mit dem zule
 | `house` | Hausverbrauch in W = `pvAc − grid`, nie unter 0 |
 | `ok` | Bilanz plausibel: \|pv − grid − battery − house\| ≤ 500 W + 5 % von pv |
 | `dur` | Dauer der Schnappschuss-Abfragen in ms |
+| `sinceWrite` | Sekunden seit dem letzten Schreibbefehl der Instanz (`null`, wenn seit dem Start nicht geschrieben wurde). Hilft zu erkennen, ob eine unplausible Bilanz mit einer Umstellung zusammenhängt. |
 
 - Die Vorzeichen sind **immer** wie bei Huawei – unabhängig von den Einstellungen „Vorzeichen Netz/Akku“. Wer die Werte weiterverarbeitet, muss also nichts umrechnen.
 - Der Schnappschuss wird bei jeder Abfrage der Leistungswerte erneuert; `t` zeigt, wie alt er ist.
-- **Bilanz:** `pv − grid − battery − house` ergibt rechnerisch `pv − battery − pvAc`, also die Verluste des Wechselrichters (meist wenige Prozent). Passt die Bilanz nicht, stammen die Werte nicht aus demselben Moment oder ein Wert ist falsch. „Diagnose anzeigen“ zählt solche Schnappschüsse und zeigt den letzten mit allen Werten.
+- **Bilanz:** `pv − grid − battery − house` ergibt rechnerisch `pv − battery − pvAc`, also die Verluste des Wechselrichters (meist wenige Prozent). Passt die Bilanz nicht, stammen die Werte nicht aus demselben Moment oder ein Wert ist falsch. „Diagnose anzeigen“ zählt solche Schnappschüsse und listet die letzten 20 mit allen Werten und dem Abstand zum letzten Schreibbefehl.
+- Auch wenn PV- und AC-Leistung aus derselben Anfrage stammen, kann die Bilanz kurz nicht passen: Der Wechselrichter aktualisiert seine Register intern nicht alle gleichzeitig (z. B. bei schnell wechselnden Wolken oder kurz nach einer Umstellung des Akkus). Solche Schnappschüsse am besten verwerfen (`ok` = false).
 
 **Ohne Antwort:**
 
@@ -387,6 +390,7 @@ Nach einem Neustart von Symcon vergleicht das Modul den ersten Wert mit dem zule
 
 - **Echter Verbindungsabbruch** (Dongle startet neu, WLAN weg): Der Client Socket von Symcon merkt das und verbindet sich selbst neu. Das Modul fragt einfach weiter ab, sobald die Verbindung wieder steht. Dafür ist nichts einzustellen.
 - **Dongle „hängt“:** Beim Huawei Smart Dongle kommt es vor, dass die TCP-Verbindung für Symcon offen bleibt, aber keine Antworten mehr kommen. Symcon merkt das nicht, der Client Socket bleibt „verbunden“. Das Modul sieht es an mehreren Durchläufen ohne Antwort hintereinander.
+- **Mehrere Instanzen am selben Dongle** (z. B. kaskadierte Wechselrichter mit je eigenem Gateway/Geräte-ID): Alle Instanzen an derselben Schnittstelle fragen nacheinander ab, nie gleichzeitig.
 - **Option „Verbindung automatisch neu aufbauen, wenn der Smart Dongle hängt“** (Kommunikation (Experten), Standard **aus**): Nach der eingestellten Zahl fehlgeschlagener Durchläufe (Standard 5) schließt das Modul die Schnittstelle (Client Socket) für 5 s und öffnet sie wieder – höchstens alle 10 Minuten, mit Eintrag in den Meldungen. Dabei ändert das Modul die Einstellung „Offen“ der Schnittstelle, die zur eigenen Verbindung (Gateway → Client Socket) gehört. Deshalb ist die Option nur auf ausdrücklichen Wunsch aktiv.
 - Ohne die Option bleibt die Instanz bei einem hängenden Dongle auf „Keine Antwort vom Wechselrichter“, bis sich der Dongle erholt oder die Schnittstelle von Hand aus- und eingeschaltet wird.
 

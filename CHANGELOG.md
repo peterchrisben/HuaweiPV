@@ -2,6 +2,18 @@
 
 ## Version 1.4
 
+### Build 19 (28.10.2026)
+
+#### Neu
+- Diagnose: die letzten 20 unplausiblen Bilanzen mit allen Werten und dem Abstand zum letzten Schreibbefehl
+- `HPV_GetSnapshot`: zusätzliches Feld `sinceWrite` (Sekunden seit dem letzten Schreibbefehl); alle bisherigen Felder unverändert
+
+#### Geändert
+- Mehrere Instanzen an derselben Schnittstelle (z. B. kaskadierte Wechselrichter am selben Smart Dongle) fragen nacheinander statt gleichzeitig ab. Bei Anlagen mit einem Wechselrichter ändert sich nichts.
+
+#### Behoben
+- Wirkungsgrad ohne Wert (morgens/abends bei wenig PV) zählt nicht mehr als verworfener Wert
+
 ### Build 18 (26.10.2026)
 
 Für Energiemanager: zeitgleiche Leistungswerte. Bestehende Einstellungen, Variablen und Funktionen bleiben unverändert.

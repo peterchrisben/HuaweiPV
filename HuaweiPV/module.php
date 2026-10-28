@@ -386,6 +386,12 @@ class HuaweiPV extends IPSModule
             'Letzter Schreibbefehl: ' . ($d['lastWrite'] !== '' ? $d['lastWrite'] : '–'),
             'Letzter Schreibfehler: ' . ($d['lastWriteError'] !== '' ? $d['lastWriteError'] : '–')
         ];
+        if (!empty($d['balanceLog'])) {
+            $lines[] = 'Letzte ' . count($d['balanceLog']) . ' unplausible Bilanzen (neueste zuletzt, Abweichung = PV − Netz − Akku − Haus):';
+            foreach ($d['balanceLog'] as $entry) {
+                $lines[] = '  · ' . $entry;
+            }
+        }
         $text = implode("\n", $lines);
         $this->SendDebug('Diagnose', $text, 0);
         $this->UpdateFormField('Result', 'caption', $text);
@@ -1234,9 +1240,10 @@ class HuaweiPV extends IPSModule
         $deviation = $complete ? $pv - $grid - $battery - $house : null;
         $ok = $complete && abs($deviation) <= self::BALANCE_TOLERANCE_W + 0.05 * max(0.0, $pv);
         $dur = (int) round(($end - $start) * 1000);
+        $sinceWrite = $diag['lastWriteTime'] > 0 ? max(0, (int) floor($start) - (int) $diag['lastWriteTime']) : null;
         $snapshot = [
             't' => (int) floor($start), 'pv' => $pv, 'pvAc' => $ac, 'grid' => $grid, 'battery' => $hasBattery ? $battery : null,
-            'soc' => $soc, 'house' => $house, 'ok' => $ok, 'dur' => $dur
+            'soc' => $soc, 'house' => $house, 'ok' => $ok, 'dur' => $dur, 'sinceWrite' => $sinceWrite
         ];
         $this->SetBuffer('Snapshot', json_encode($snapshot));
         $this->SendDebug('Schnappschuss', sprintf('%d ms – PV %s W, AC %s W, Netz %s W, Akku %s W, Haus %s W, Abweichung %s W%s',
@@ -1246,6 +1253,9 @@ class HuaweiPV extends IPSModule
             $diag['balanceBad']++;
             $diag['lastBalance'] = sprintf('%s – %d W (PV %d, AC %d, Netz %d, Akku %d, Haus %d)', date('d.m. H:i:s', (int) $start),
                 (int) round($deviation), (int) round($pv), (int) round($ac), (int) round($grid), (int) round($battery), (int) round($house));
+            // Die letzten 20 für die Diagnose – mit Abstand zum letzten Schreibbefehl, um Zusammenhänge zu erkennen
+            $diag['balanceLog'][] = $diag['lastBalance'] . ($sinceWrite === null ? '' : sprintf(' · %s nach Schreibbefehl', $this->Ago($sinceWrite)));
+            $diag['balanceLog'] = array_slice($diag['balanceLog'], -self::BALANCE_LOG_MAX);
         }
         if ($complete) {
             $diag['snapshots']++;
@@ -1261,6 +1271,19 @@ class HuaweiPV extends IPSModule
             $len += HPVRegisters::Length($defs[$ident]);
         }
         return $block['qty'] > $len;
+    }
+
+    private const BALANCE_LOG_MAX = 20;
+
+    private function Ago(int $seconds): string
+    {
+        if ($seconds < 120) {
+            return $seconds . ' s';
+        }
+        if ($seconds < 7200) {
+            return round($seconds / 60) . ' min';
+        }
+        return round($seconds / 3600) . ' h';
     }
 
     /** Erlaubte Abweichung der Bilanz PV − Netz − Akku − Haus: 500 W + 5 % der PV-Leistung (Wechselrichterverluste). */
@@ -1322,8 +1345,7 @@ class HuaweiPV extends IPSModule
             'Data'     => ''
         ]);
 
-        $gateway = $this->GatewayID();
-        $lock = 'HPV_Gateway_' . $gateway;
+        $lock = $this->BusLock();
         if (!IPS_SemaphoreEnter($lock, 15000)) {
             return ['ok' => false, 'regs' => [], 'kind' => 'busy', 'message' => 'Gateway belegt (Semaphore)'];
         }
@@ -1403,6 +1425,10 @@ class HuaweiPV extends IPSModule
                     return false;
                 }
                 $value = 0.0;   // es fließt nichts
+            } elseif ($ident === 'Efficiency') {
+                // Ohne ausreichende PV-Leistung (morgens/abends) liefert Huawei keinen Wirkungsgrad – kein Fehler
+                $this->SendDebug('Kein Wirkungsgrad', 'Wechselrichter meldet keinen Wirkungsgrad (letzter Wert bleibt)', 0);
+                return false;
             } else {
                 $this->Reject($ident, $def, 'ungültiger Rohwert (Huawei-Kennung)', $diag);
                 return false;
@@ -1801,6 +1827,7 @@ class HuaweiPV extends IPSModule
             $res = $this->WriteRegisters($addr, $regs);
             if ($res['ok']) {
                 $diag['lastWrite'] = date('d.m. H:i:s') . ' – ' . $what . ' (Register ' . $addr . ')';
+                $diag['lastWriteTime'] = time();
                 $this->WriteDiag($diag);
                 $this->SendDebug('Schreiben', $diag['lastWrite'], 0);
                 return true;
@@ -1834,7 +1861,7 @@ class HuaweiPV extends IPSModule
         ]);
         $this->SendDebug('Schreibe ' . $addr, bin2hex($binary), 0);
 
-        $lock = 'HPV_Gateway_' . $this->GatewayID();
+        $lock = $this->BusLock();
         if (!IPS_SemaphoreEnter($lock, 15000)) {
             return ['ok' => false, 'kind' => 'busy', 'message' => 'Gateway belegt (Semaphore)'];
         }
@@ -1941,6 +1968,17 @@ class HuaweiPV extends IPSModule
     private function GatewayID(): int
     {
         return (int) (IPS_GetInstance($this->InstanceID)['ConnectionID'] ?? 0);
+    }
+
+    /**
+     * Sperre für den Datenverkehr: je Schnittstelle (Client Socket), nicht je Gateway. Bei kaskadierten Anlagen
+     * hängen mehrere Gateways (Geräte-IDs) mit je einer Instanz am selben Smart Dongle – so fragt immer nur
+     * eine Instanz gleichzeitig. Bei einer Anlage mit einem Wechselrichter ändert sich nichts.
+     */
+    private function BusLock(): string
+    {
+        $io = $this->IOID();
+        return $io > 0 ? 'HPV_IO_' . $io : 'HPV_Gateway_' . $this->GatewayID();
     }
 
     private function IOID(): int
@@ -2379,7 +2417,8 @@ class HuaweiPV extends IPSModule
             'date' => date('Y-m-d'), 'requests' => 0, 'errors' => 0, 'busy' => 0, 'timeouts' => 0, 'retries' => 0,
             'rejected' => 0, 'lastError' => '', 'lastRejected' => '', 'lastSuccess' => 0, 'failedCycles' => 0, 'lastReconnect' => 0,
             'writes' => 0, 'lastWrite' => '', 'lastWriteError' => '',
-            'writesSkipped' => 0, 'snapshots' => 0, 'snapshotMs' => 0, 'balanceBad' => 0, 'lastBalance' => ''
+            'writesSkipped' => 0, 'snapshots' => 0, 'snapshotMs' => 0, 'balanceBad' => 0, 'lastBalance' => '',
+            'lastWriteTime' => 0, 'balanceLog' => []
         ];
         $d = is_array($d) ? array_merge($default, $d) : $default;
         if ($d['date'] !== date('Y-m-d')) {
@@ -2387,6 +2426,7 @@ class HuaweiPV extends IPSModule
             foreach (['requests', 'errors', 'busy', 'timeouts', 'retries', 'rejected', 'writes', 'writesSkipped', 'snapshots', 'snapshotMs', 'balanceBad'] as $k) {
                 $d[$k] = 0;
             }
+            $d['balanceLog'] = [];
             $d['date'] = date('Y-m-d');
         }
         return $d;
