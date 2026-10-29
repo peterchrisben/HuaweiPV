@@ -2,7 +2,7 @@
 
 Symcon-Modul für Huawei-PV-Anlagen: Wechselrichter **SUN2000** (z. B. SUN2000-5KTL-M1), Akku **LUNA2000** und Smartmeter **DTSU666-H** über **Modbus TCP** (Smart Dongle oder direkte Verbindung).
 
-Aktuelle Version: 1.4 (Build 19)
+Aktuelle Version: 1.4 (Build 20)
 
 Autor: Peter Chrisben · Lizenz: [CC BY-NC-SA 4.0](LICENSE)
 
@@ -330,6 +330,7 @@ Bevor ein Wert in eine Variable geschrieben wird, prüft ihn das Modul:
 | Huawei-Kennung „ungültig“ (0xFFFF, 0x7FFF, 0xFFFFFFFF, 0x7FFFFFFF) | Ladestand 6553,5 % | wird immer verworfen |
 | … bei Akku-Werten, während der Akku ruht (Ruhemodus, Standby, Offline) | Akku-Leistung nachts bei 5 % | kein Fehler: Akku-Leistung = 0 W, andere Akku-Werte behalten den letzten Wert |
 | … beim Wirkungsgrad | morgens/abends bei wenig PV | kein Fehler: letzter Wert bleibt |
+| Akku-Leistung passt nicht zu PV und AC-Leistung derselben Abfrage (Akku ≈ PV − AC, Toleranz 500 W + 5 % der PV) | +1312 W „Laden“ bei 22 W PV, ohne Netzbezug | wird zurückgehalten, der letzte Wert bleibt (kommt nicht ins Archiv). Echte Sprünge, z. B. wenn die Sonne rauskommt, passen zu PV/AC und gehen sofort durch. Passt es länger als 60 s nicht, wird der Wert trotzdem übernommen. |
 | Feste Grenzen | Ladestand 101 %, Leistung über „höchste plausible Leistung“ | wird immer verworfen |
 | Zähler läuft rückwärts oder fällt auf 0 | Gesamtertrag 12345 → 0 kWh | auffällig |
 | Zähler springt schneller, als die Anlage erzeugen kann | +500 kWh in einer Minute | auffällig |
@@ -360,7 +361,7 @@ Nach einem Neustart von Symcon vergleicht das Modul den ersten Wert mit dem zule
 `HPV_GetSnapshot(int $InstanzID): string` liefert die Werte des letzten Schnappschusses als JSON:
 
 ```json
-{"t": 1793027060, "pv": 3000, "pvAc": 2400, "grid": 1000, "battery": 500, "soc": 70, "house": 1400, "ok": true, "dur": 820, "sinceWrite": 95}
+{"t": 1793027060, "pv": 3000, "pvAc": 2400, "grid": 1000, "battery": 500, "soc": 70, "house": 1400, "ok": true, "dur": 820, "sinceWrite": 95, "batteryCalc": 600}
 ```
 
 | Feld | Bedeutung |
@@ -374,6 +375,7 @@ Nach einem Neustart von Symcon vergleicht das Modul den ersten Wert mit dem zule
 | `house` | Hausverbrauch in W = `pvAc − grid`, nie unter 0 |
 | `ok` | Bilanz plausibel: \|pv − grid − battery − house\| ≤ 500 W + 5 % von pv |
 | `dur` | Dauer der Schnappschuss-Abfragen in ms |
+| `batteryCalc` | Akku-Leistung errechnet als `pv − pvAc` (DC-gekoppelter Akku, ungenau um die Wechselrichterverluste). Passt immer zu PV/AC derselben Anfrage – nützlich, wenn `ok` = false ist. `null` ohne Akku. |
 | `sinceWrite` | Sekunden seit dem letzten Schreibbefehl der Instanz (`null`, wenn seit dem Start nicht geschrieben wurde). Hilft zu erkennen, ob eine unplausible Bilanz mit einer Umstellung zusammenhängt. |
 
 - Die Vorzeichen sind **immer** wie bei Huawei – unabhängig von den Einstellungen „Vorzeichen Netz/Akku“. Wer die Werte weiterverarbeitet, muss also nichts umrechnen.

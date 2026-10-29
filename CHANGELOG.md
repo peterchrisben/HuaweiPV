@@ -2,6 +2,14 @@
 
 ## Version 1.4
 
+### Build 20 (29.10.2026)
+
+#### Behoben
+- Akku-Leistung: Der Wechselrichter meldet gelegentlich bis zu ~20 s lang einen falschen Wert (z. B. +1312 W „Laden“ bei 22 W PV, mitten im Entladen). Die Akku-Leistung wird jetzt gegen PV und AC-Leistung derselben Abfrage geprüft (Akku ≈ PV − AC). Passt sie nicht, bleibt der letzte Wert stehen und der Ausreißer kommt nicht ins Archiv. Echte Sprünge (Sonne kommt raus) passen zu PV/AC und werden sofort übernommen; passt es länger als 60 s nicht, wird trotzdem übernommen.
+
+#### Neu
+- `HPV_GetSnapshot`: Feld `batteryCalc` (Akku-Leistung aus PV − AC); Diagnose: Zähler „Akku-Wert zurückgehalten“. Bisherige Felder unverändert.
+
 ### Build 19 (28.10.2026)
 
 #### Neu

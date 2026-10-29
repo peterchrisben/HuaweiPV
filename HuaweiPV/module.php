@@ -378,8 +378,8 @@ class HuaweiPV extends IPSModule
             'Letzter Fehler: ' . ($d['lastError'] !== '' ? $d['lastError'] : '–'),
             'Letzter verworfener Wert: ' . ($d['lastRejected'] !== '' ? $d['lastRejected'] : '–'),
             'Letzter Neuaufbau der Verbindung: ' . ($d['lastReconnect'] > 0 ? date('d.m.Y H:i:s', $d['lastReconnect']) : '–'),
-            sprintf('Schnappschuss (PV/Netz/Akku zeitgleich): heute %d, Dauer im Schnitt %s ms, Bilanz unplausibel: %d',
-                $d['snapshots'], $d['snapshots'] > 0 ? (string) round($d['snapshotMs'] / $d['snapshots']) : '–', $d['balanceBad']),
+            sprintf('Schnappschuss (PV/Netz/Akku zeitgleich): heute %d, Dauer im Schnitt %s ms, Bilanz unplausibel: %d, Akku-Wert zurückgehalten: %d',
+                $d['snapshots'], $d['snapshots'] > 0 ? (string) round($d['snapshotMs'] / $d['snapshots']) : '–', $d['balanceBad'], $d['batteryHeld']),
             'Letzte unplausible Bilanz: ' . ($d['lastBalance'] !== '' ? $d['lastBalance'] : '–'),
             'Steuerung: ' . ($this->ReadPropertyBoolean('AllowControl') ? 'erlaubt' : 'gesperrt')
                 . sprintf(' – heute %d Schreibbefehle, %d übersprungen (Wert stand schon im Wechselrichter)', $d['writes'], $d['writesSkipped']),
@@ -1181,6 +1181,10 @@ class HuaweiPV extends IPSModule
                 $def = $defs[$ident];
                 $len = HPVRegisters::Length($def);
                 $value = HPVRegisters::Decode($def, array_slice($res['regs'], $def['addr'] - $block['addr'], $len));
+                if ($ident === 'BatteryPower' && $isSnap && $value !== null && $this->HoldBatteryValue((float) $value, $snapRaw, $diag)) {
+                    $snapRaw['BatteryPower'] = (float) $value;   // Schnappschuss meldet den Rohwert, die Variable bleibt
+                    continue;
+                }
                 if ($this->Accept($ident, $def, $value, $state, $diag, $now)) {
                     $updated[$ident] = true;
                     if ($isSnap) {
@@ -1243,7 +1247,8 @@ class HuaweiPV extends IPSModule
         $sinceWrite = $diag['lastWriteTime'] > 0 ? max(0, (int) floor($start) - (int) $diag['lastWriteTime']) : null;
         $snapshot = [
             't' => (int) floor($start), 'pv' => $pv, 'pvAc' => $ac, 'grid' => $grid, 'battery' => $hasBattery ? $battery : null,
-            'soc' => $soc, 'house' => $house, 'ok' => $ok, 'dur' => $dur, 'sinceWrite' => $sinceWrite
+            'soc' => $soc, 'house' => $house, 'ok' => $ok, 'dur' => $dur, 'sinceWrite' => $sinceWrite,
+            'batteryCalc' => ($hasBattery && $pv !== null && $ac !== null) ? round($pv - $ac, 1) : null
         ];
         $this->SetBuffer('Snapshot', json_encode($snapshot));
         $this->SendDebug('Schnappschuss', sprintf('%d ms – PV %s W, AC %s W, Netz %s W, Akku %s W, Haus %s W, Abweichung %s W%s',
@@ -1262,6 +1267,42 @@ class HuaweiPV extends IPSModule
             $diag['snapshotMs'] += $dur;
         }
     }
+
+    /**
+     * Akku-Leistung gegen PV und AC-Leistung derselben Anfrage prüfen (DC-gekoppelter Akku: Akku ≈ PV − AC).
+     * Huawei meldet gelegentlich für bis zu ~20 s einen falschen Akku-Wert (z. B. +1312 W Laden bei 22 W PV).
+     * Passt der Wert nicht, bleibt der letzte Wert in der Variable (kommt nicht ins Archiv). Echte Sprünge
+     * (Sonne kommt raus → Laden) passen zu PV und AC und gehen sofort durch. Passt es länger als
+     * BATTERY_HOLD_MAX s nicht, wird trotzdem übernommen (kein Einfrieren bei dauerhaft anderer Lage).
+     * @return bool true = zurückhalten
+     */
+    private function HoldBatteryValue(float $battery, array $snapRaw, array &$diag): bool
+    {
+        if (!isset($snapRaw['PVPower'], $snapRaw['ActivePower'])) {
+            return false;   // ohne PV/AC dieser Abfrage keine Prüfung
+        }
+        $pv = $snapRaw['PVPower'];
+        $deviation = $pv - $battery - $snapRaw['ActivePower'];
+        if (abs($deviation) <= self::BALANCE_TOLERANCE_W + 0.05 * max(0.0, $pv)) {
+            $this->SetBuffer('BatteryHoldSince', '');
+            return false;
+        }
+        $since = (int) $this->GetBuffer('BatteryHoldSince');
+        if ($since === 0) {
+            $since = time();
+            $this->SetBuffer('BatteryHoldSince', (string) $since);
+        }
+        if (time() - $since > self::BATTERY_HOLD_MAX) {
+            $this->SendDebug('Akku-Prüfung', sprintf('Akku %d W passt seit %d s nicht zu PV/AC – wird übernommen', (int) round($battery), time() - $since), 0);
+            return false;
+        }
+        $diag['batteryHeld']++;
+        $this->SendDebug('Akku-Prüfung', sprintf('Akku %d W passt nicht zu PV %d W / AC %d W (erwartet ca. %d W) – zurückgehalten',
+            (int) round($battery), (int) round($pv), (int) round($snapRaw['ActivePower']), (int) round($pv - $snapRaw['ActivePower'])), 0);
+        return true;
+    }
+
+    private const BATTERY_HOLD_MAX = 60;
 
     /** Enthält der Block mitgelesene Register, die zu keinem Wert gehören (Lücke im Schnappschuss)? */
     private function HasGap(array $block, array $defs): bool
@@ -2418,12 +2459,12 @@ class HuaweiPV extends IPSModule
             'rejected' => 0, 'lastError' => '', 'lastRejected' => '', 'lastSuccess' => 0, 'failedCycles' => 0, 'lastReconnect' => 0,
             'writes' => 0, 'lastWrite' => '', 'lastWriteError' => '',
             'writesSkipped' => 0, 'snapshots' => 0, 'snapshotMs' => 0, 'balanceBad' => 0, 'lastBalance' => '',
-            'lastWriteTime' => 0, 'balanceLog' => []
+            'lastWriteTime' => 0, 'balanceLog' => [], 'batteryHeld' => 0
         ];
         $d = is_array($d) ? array_merge($default, $d) : $default;
         if ($d['date'] !== date('Y-m-d')) {
             // Tageszähler zurücksetzen, Rest behalten
-            foreach (['requests', 'errors', 'busy', 'timeouts', 'retries', 'rejected', 'writes', 'writesSkipped', 'snapshots', 'snapshotMs', 'balanceBad'] as $k) {
+            foreach (['requests', 'errors', 'busy', 'timeouts', 'retries', 'rejected', 'writes', 'writesSkipped', 'snapshots', 'snapshotMs', 'balanceBad', 'batteryHeld'] as $k) {
                 $d[$k] = 0;
             }
             $d['balanceLog'] = [];
