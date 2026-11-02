@@ -2,6 +2,13 @@
 
 ## Version 1.3
 
+### Build 21 (02.11.2026)
+
+Fehlerbehebung für Symcon 9.1 (Testversion), sonst keine Änderungen gegenüber Build 17.
+
+#### Behoben
+- Symcon 9.1 prüft die Darstellungs-Parameter strenger. Die Klartext-Darstellungen der Integer-Variablen (Gerätestatus, Akku-Betriebsart, Zählerstatus …) enthielten in den Intervallen Unterparameter, die 9.1 nicht mehr kennt. Dort brach „Übernehmen“ mit „Der Eintrag im Parameter INTERVALS enthält unbekannte Unterparameter“ (Fehler -32603) ab, die Variablen wurden nicht angelegt und das Modul meldete anschließend „Variable is marked as read-only“. Die Intervalle enthalten jetzt nur noch die nötigen Schlüssel (Forum 144710, Beitrag 13). Unter Symcon 8.x/9.0 ändert sich nichts.
+
 ### Build 17 (21.10.2026)
 
 Vorbereitung für den Symcon Module Store.
