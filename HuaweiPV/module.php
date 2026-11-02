@@ -2292,13 +2292,15 @@ class HuaweiPV extends IPSModule
     {
         $intervals = [];
         foreach ($map as $value => $text) {
+            // Nur die nötigen Schlüssel (wie im Doku-Beispiel). Symcon 9.1 prüft die Unterparameter streng
+            // und lehnte den Eintrag mit „unbekannte Unterparameter“ ab (Forum 144710, Beitrag 13) –
+            // dort brach ApplyChanges mit -32603 ab. Die abgeschalteten Überschreibungen brauchen keine Werte.
             $intervals[] = [
                 'IntervalMinValue' => $value, 'IntervalMaxValue' => $value,
                 'ConstantActive'   => true, 'ConstantValue' => $text,
                 'ConversionFactor' => 1,
-                'PrefixActive'     => false, 'PrefixValue' => '', 'SuffixActive' => false, 'SuffixValue' => '',
-                'DigitsActive'     => false, 'DigitsValue' => 0,
-                'IconActive'       => false, 'IconValue' => '', 'ColorActive' => false, 'Color' => -1
+                'PrefixActive'     => false, 'SuffixActive' => false,
+                'DigitsActive'     => false, 'IconActive' => false, 'ColorActive' => false
             ];
         }
         return [

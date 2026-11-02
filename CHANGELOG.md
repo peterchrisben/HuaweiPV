@@ -5,6 +5,7 @@
 ### Build 20 (29.10.2026)
 
 #### Behoben
+- Symcon 9.1: Die Klartext-Darstellungen der Integer-Variablen (Gerätestatus, Akku-Betriebsart, Zählerstatus …) enthielten in den Intervallen Unterparameter, die Symcon 9.1 nicht mehr kennt. Dort brach „Übernehmen“ mit „Der Eintrag im Parameter INTERVALS enthält unbekannte Unterparameter“ (Fehler -32603) ab, die Variablen wurden nicht angelegt. Die Intervalle enthalten jetzt nur noch die nötigen Schlüssel (Forum 144710, Beitrag 13).
 - Akku-Leistung: Der Wechselrichter meldet gelegentlich bis zu ~20 s lang einen falschen Wert (z. B. +1312 W „Laden“ bei 22 W PV, mitten im Entladen). Die Akku-Leistung wird jetzt gegen PV und AC-Leistung derselben Abfrage geprüft (Akku ≈ PV − AC). Passt sie nicht, bleibt der letzte Wert stehen und der Ausreißer kommt nicht ins Archiv. Echte Sprünge (Sonne kommt raus) passen zu PV/AC und werden sofort übernommen; passt es länger als 60 s nicht, wird trotzdem übernommen.
 
 #### Neu
